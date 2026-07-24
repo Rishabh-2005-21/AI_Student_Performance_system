@@ -1,0 +1,9 @@
+Flask
+Flask-Cors
+PyPDF2
+pymongo
+bcrypt
+PyJWT
+python-docx
+google-generativeai
+python-pptx
