@@ -464,7 +464,9 @@ const SyllabusSection = ({ mentorId, uploadSummary, onSubjectRemoved, onUploaded
 
     try {
       setLoading(true); setStatus({ type:"", msg:"Processing file for Semester "+sem+"..." });
-      const { data } = await api.post("/mentor/curriculum/pdf", fd);
+      const { data } = await api.post("/mentor/curriculum/pdf", fd, {
+        headers: { "Content-Type": "multipart/form-data" }
+      });
       if (data.error) { setStatus({ type:"error", msg:data.error }); return; }
       setStatus({ type:"success", msg:"OK: "+data.message+" | Formats: "+(data.question_types||types).map(t=>TYPE_LABELS[t]||t).join(", ") });
       onUploaded(data); setPdf(null);

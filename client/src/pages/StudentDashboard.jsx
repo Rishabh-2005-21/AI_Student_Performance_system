@@ -36,21 +36,24 @@ const StudentDashboard = () => {
       return;
     }
     try {
-      const { data } = await api.get(`/mentor/curriculum/options?mentor_id=${mentorId}`);
-      if (data.error || !data.options.length) {
-        setInfoStatus({ type: 'error', msg: data.error || 'No uploaded curriculum found for mentor.' });
+      const { data } = await api.get(`/mentor/curriculum/options?mentor_id=${mentorId.trim()}`);
+      if (data.error || !data.options || !data.options.length) {
+        setInfoStatus({ type: 'error', msg: data.error || `No uploaded curriculum found for mentor ID '${mentorId}'.` });
       } else {
         setRawOptions(data.options);
         const sems = ['1', '2', '3', '4', '5', '6', '7', '8'];
-        const subs = data.options.filter((o) => String(o.semester) === sems[0]).map((o) => o.subject);
+        const availableSems = [...new Set(data.options.map(o => String(o.semester)))];
+        const activeSem = availableSems.length > 0 ? availableSems[0] : sems[0];
+        const subs = data.options.filter((o) => String(o.semester) === activeSem).map((o) => o.subject);
         setOptions({ semesters: sems, subjects: subs });
-        setStudentDetails((prev) => ({ ...prev, semester: sems[0], subject: subs[0] || '' }));
-        setInfoStatus({ type: 'success', msg: 'Options loaded successfully' });
+        setStudentDetails((prev) => ({ ...prev, semester: activeSem, subject: subs[0] || '' }));
+        setInfoStatus({ type: 'success', msg: `Loaded ${data.options.length} subject(s) for mentor ${mentorId.trim()}. Selected Semester ${activeSem}.` });
       }
     } catch (err) {
-      setInfoStatus({ type: 'error', msg: 'Failed to load options' });
+      setInfoStatus({ type: 'error', msg: err?.response?.data?.error || 'Failed to load options for mentor.' });
     }
   };
+
 
   const startSession = async () => {
     const { name, enrollment, semester, subject } = studentDetails;
