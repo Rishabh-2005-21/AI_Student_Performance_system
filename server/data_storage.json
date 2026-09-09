@@ -1,0 +1,177 @@
+{
+  "users": {
+    "MTR001::faculty": {
+      "identifier": "MTR001",
+      "name": "Faculty 1",
+      "role": "faculty",
+      "password_hash": "$2b$12$0HA1987YQoltEFPz56Mpfec9VRYpXbubBJeZOpdAPfnZKzhu81DmC",
+      "created_at": "2026-09-09 17:32:46.362610+00:00",
+      "is_active": true
+    },
+    "MTR002::faculty": {
+      "identifier": "MTR002",
+      "name": "Faculty 2",
+      "role": "faculty",
+      "password_hash": "$2b$12$agaALpcvtbauGQl1Xryks.SpxDpmBtUBl0rKEgU.onzknpsIPBBSy",
+      "created_at": "2026-09-09 17:32:46.847283+00:00",
+      "is_active": true
+    },
+    "ADMIN::faculty": {
+      "identifier": "ADMIN",
+      "name": "Administrator",
+      "role": "faculty",
+      "password_hash": "$2b$12$bzLxJrOEy0FEyeaJETnnA.3CJzCD8s6paRLX2fC5F/XFKB56o.UyS",
+      "created_at": "2026-09-09 17:32:47.333009+00:00",
+      "is_active": true
+    },
+    "STU001::student": {
+      "identifier": "STU001",
+      "name": "Alice Johnson",
+      "role": "student",
+      "password_hash": "$2b$12$PgT4fw87Bh7T7GqEWIWboe2ztyzzf5TwjkCXADIMRKTJBAhfkO8rC",
+      "created_at": "2026-09-09 17:32:47.826458+00:00",
+      "is_active": true
+    },
+    "STU002::student": {
+      "identifier": "STU002",
+      "name": "Bob Sharma",
+      "role": "student",
+      "password_hash": "$2b$12$Dy67hwRuellFfKauLH4uAOtRt2s/qWP3qVA689SqmLB8VnC7AMdDy",
+      "created_at": "2026-09-09 17:32:48.314944+00:00",
+      "is_active": true
+    }
+  },
+  "question_banks": {
+    "MTR001::advance deep learning::7": {
+      "mentor_id": "MTR001",
+      "subject": "advance deep learning",
+      "semester": "7",
+      "questions": [
+        {
+          "correct_answer": "A. Advance deep learning is a fundamental concept involving core principles",
+          "difficulty": "easy",
+          "id": "b7b0a8dd-0a9e-4997-81d7-dd03761fd4f5",
+          "options": [
+            "A. Advance deep learning is a fundamental concept involving core principles",
+            "B. Advance deep learning refers to an unrelated external mechanism",
+            "C. Advance deep learning is only applicable in theoretical scenarios",
+            "D. Advance deep learning has no practical significance"
+          ],
+          "question": "Which of the following best describes 'Advance deep learning'?",
+          "source": "rule_based",
+          "status": "approved",
+          "topic": "Advance deep learning",
+          "type": "mcq"
+        },
+        {
+          "correct_answer": "Advance deep learning is significant because it forms a core part of the subject curriculum.",
+          "difficulty": "medium",
+          "id": "26048cac-40d6-4d99-b60d-0d779960881c",
+          "options": [],
+          "question": "Briefly explain the significance of 'Advance deep learning' in this subject.",
+          "source": "rule_based",
+          "status": "approved",
+          "topic": "Advance deep learning",
+          "type": "short"
+        },
+        {
+          "correct_answer": "Advance deep learning",
+          "difficulty": "hard",
+          "id": "2e741539-8d34-4c1a-be94-6ac27aa3af66",
+          "options": [],
+          "question": "The concept of ___ is central to understanding Advance deep learning.",
+          "source": "rule_based",
+          "status": "approved",
+          "topic": "Advance deep learning",
+          "type": "fill_blank"
+        },
+        {
+          "correct_answer": "3",
+          "difficulty": "easy",
+          "id": "ed0b8c17-a87c-4b43-9dcb-7505ba81488c",
+          "options": [],
+          "question": "How many key components are typically associated with Advance deep learning? (Enter a number)",
+          "source": "rule_based",
+          "status": "approved",
+          "topic": "Advance deep learning",
+          "type": "integer"
+        }
+      ],
+      "total_approved": 4,
+      "updated_at": "2026-09-09T17:32:43.262292+00:00"
+    }
+  },
+  "curriculum": {
+    "MTR001::deep learning and neural networks::7": {
+      "mentor_id": "MTR001",
+      "subject": "deep learning and neural networks",
+      "semester": "7",
+      "key": "deep learning and neural networks::7",
+      "syllabus_text": "Deep Learning and Neural Networks\nUnit 1: Convolutional Neural Networks and Image Classification\nUnit 2: Recurrent Neural Networks and Natural Language Processing\nUnit 3: Transformer Models and Self Attention Mechanisms\nUnit 4: Generative Adversarial Networks and Autoencoders",
+      "scheme_text": "",
+      "topics": [
+        "Unit 1: Convolutional Neural Networks and Image Classification",
+        "Unit 2: Recurrent Neural Networks and Natural Language Processing",
+        "Unit 3: Transformer Models and Self Attention Mechanisms",
+        "Unit 4: Generative Adversarial Networks and Autoencoders"
+      ],
+      "question_types": [
+        "mcq",
+        "short",
+        "fill_blank",
+        "integer"
+      ],
+      "updated_at": "2026-09-09T17:32:36.601979+00:00"
+    }
+  },
+  "student_reports": {
+    "3534cb37-33bb-497f-9b51-aecf38adbde2": {
+      "session_id": "3534cb37-33bb-497f-9b51-aecf38adbde2",
+      "student_name": "Rishabh",
+      "enrollment_no": "STU012",
+      "semester": "7",
+      "mentor_id": "MTR001",
+      "subject": "deep learning and neural networks",
+      "questions_attempted": 1,
+      "overall_accuracy_percent": 0.0,
+      "total_score": -5,
+      "topic_wise_performance": {
+        "Unit 3: transformer models and self attention mechanisms": {
+          "attempts": 1,
+          "correct": 0,
+          "score": -5
+        }
+      },
+      "confidence_analysis": {
+        "misconception": 1
+      },
+      "strengths": [],
+      "weaknesses": [
+        "Unit 3: transformer models and self attention mechanisms"
+      ],
+      "overconfident_topics": [
+        "Unit 3: transformer models and self attention mechanisms"
+      ],
+      "responses": [
+        {
+          "question_id": "deep_learning_and_neural_networks_3",
+          "topic": "Unit 3: transformer models and self attention mechanisms",
+          "difficulty": "medium",
+          "student_answer": "core principle",
+          "correct_answer": "Unit 3: transformer models and self attention mechanisms",
+          "confidence": "high",
+          "is_correct": false,
+          "similarity_score": 0.23,
+          "interpretation": "misconception",
+          "score_breakdown": {
+            "accuracy": 0,
+            "confidence": -15,
+            "difficulty": 10,
+            "total": -5
+          }
+        }
+      ],
+      "saved_at": "2026-09-09T17:32:45.830365+00:00"
+    }
+  }
+}

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import api from '../api/api';
 import { Send, PlayCircle, Search, User } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, PieChart, Pie, Cell } from 'recharts';
@@ -8,7 +8,7 @@ const StudentDashboard = () => {
   const authName       = localStorage.getItem('auth_name')       || '';
   const authIdentifier = localStorage.getItem('auth_identifier') || '';
 
-  const [mentorId, setMentorId] = useState('');
+  const [mentorId, setMentorId] = useState(localStorage.getItem('student_mentor_id') || 'MTR001');
   const [studentDetails, setStudentDetails] = useState({
     name:       authName,
     enrollment: authIdentifier,
@@ -30,15 +30,16 @@ const StudentDashboard = () => {
 
   const [report, setReport] = useState(null);
 
-  const loadOptions = async () => {
-    if (!mentorId) {
+  const loadOptions = useCallback(async (targetMentorId) => {
+    const target = (targetMentorId !== undefined && typeof targetMentorId === 'string') ? targetMentorId : mentorId;
+    if (!target) {
       setInfoStatus({ type: 'error', msg: 'Enter mentor ID' });
       return;
     }
     try {
-      const { data } = await api.get(`/mentor/curriculum/options?mentor_id=${mentorId.trim()}`);
+      const { data } = await api.get(`/mentor/curriculum/options?mentor_id=${target.trim()}`);
       if (data.error || !data.options || !data.options.length) {
-        setInfoStatus({ type: 'error', msg: data.error || `No uploaded curriculum found for mentor ID '${mentorId}'.` });
+        setInfoStatus({ type: 'error', msg: data.error || `No uploaded curriculum found for mentor ID '${target}'.` });
       } else {
         setRawOptions(data.options);
         const sems = ['1', '2', '3', '4', '5', '6', '7', '8'];
@@ -47,12 +48,18 @@ const StudentDashboard = () => {
         const subs = data.options.filter((o) => String(o.semester) === activeSem).map((o) => o.subject);
         setOptions({ semesters: sems, subjects: subs });
         setStudentDetails((prev) => ({ ...prev, semester: activeSem, subject: subs[0] || '' }));
-        setInfoStatus({ type: 'success', msg: `Loaded ${data.options.length} subject(s) for mentor ${mentorId.trim()}. Selected Semester ${activeSem}.` });
+        setInfoStatus({ type: 'success', msg: `Loaded ${data.options.length} subject(s) for mentor ${target.trim()}. Selected Semester ${activeSem}.` });
+        localStorage.setItem('student_mentor_id', target.trim());
       }
     } catch (err) {
       setInfoStatus({ type: 'error', msg: err?.response?.data?.error || 'Failed to load options for mentor.' });
     }
-  };
+  }, [mentorId]);
+
+  useEffect(() => {
+    const initialMentor = localStorage.getItem('student_mentor_id') || 'MTR001';
+    loadOptions(initialMentor);
+  }, [loadOptions]);
 
 
   const startSession = async () => {

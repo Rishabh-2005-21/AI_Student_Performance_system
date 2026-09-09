@@ -8,13 +8,52 @@ from typing import Optional, List, Dict
 
 import bcrypt
 
+import json
+
 # ---------------------------------------------------------------------------
-# In-Memory Fallback Cache (ensures zero crashes if MongoDB Atlas is unavailable)
+# Persistent Disk Storage File (ensures data survives restarts & logouts)
 # ---------------------------------------------------------------------------
+STORAGE_FILE = os.path.join(os.path.dirname(__file__), "data_storage.json")
+
 _IN_MEMORY_USERS: Dict[str, Dict] = {}
 _IN_MEMORY_QUESTION_BANKS: Dict[str, Dict] = {}
 _IN_MEMORY_CURRICULUM: Dict[str, Dict] = {}
 _IN_MEMORY_STUDENT_REPORTS: Dict[str, Dict] = {}
+
+
+def _save_storage_file():
+    """Flush in-memory stores to disk so data persists permanently across restarts and logouts."""
+    try:
+        data = {
+            "users": {f"{k[0]}::{k[1]}": v for k, v in _IN_MEMORY_USERS.items()},
+            "question_banks": _IN_MEMORY_QUESTION_BANKS,
+            "curriculum": _IN_MEMORY_CURRICULUM,
+            "student_reports": _IN_MEMORY_STUDENT_REPORTS,
+        }
+        with open(STORAGE_FILE, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2, default=str)
+    except Exception as exc:
+        print(f"[Storage] Notice saving storage file: {exc}")
+
+
+def _load_storage_file():
+    """Load persistent storage file into memory on startup."""
+    if not os.path.exists(STORAGE_FILE):
+        return
+    try:
+        with open(STORAGE_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            users_data = data.get("users", {})
+            for key_str, v in users_data.items():
+                parts = key_str.split("::")
+                if len(parts) == 2:
+                    _IN_MEMORY_USERS[(parts[0], parts[1])] = v
+            _IN_MEMORY_QUESTION_BANKS.update(data.get("question_banks", {}))
+            _IN_MEMORY_CURRICULUM.update(data.get("curriculum", {}))
+            _IN_MEMORY_STUDENT_REPORTS.update(data.get("student_reports", {}))
+            print(f"[Storage] Loaded persistent data from disk: {len(_IN_MEMORY_CURRICULUM)} curriculum items, {len(_IN_MEMORY_QUESTION_BANKS)} question banks.")
+    except Exception as exc:
+        print(f"[Storage] Notice loading storage file: {exc}")
 
 
 # ---------------------------------------------------------------------------
@@ -158,6 +197,8 @@ def seed_default_users() -> None:
         )
     except Exception as exc:
         print(f"[MongoDB] Notice during seeding (in-memory active): {exc}")
+    finally:
+        _save_storage_file()
 
 
 
@@ -170,6 +211,7 @@ def init_mongo() -> bool:
     Connect to MongoDB and seed default users.
     Returns True if successful, False if MongoDB is unavailable.
     """
+    _load_storage_file()
     seed_default_users()
     try:
         db = get_db()
@@ -220,6 +262,7 @@ def create_user(identifier: str, name: str, role: str, password: str) -> dict:
     except Exception as exc:
         print(f"[MongoDB] Notice during create_user: {exc}")
 
+    _save_storage_file()
     return doc
 
 
@@ -268,6 +311,7 @@ def upsert_question_bank(
     except Exception as exc:
         print(f"[MongoDB] Notice during upsert_question_bank (saved in-memory): {exc}")
 
+    _save_storage_file()
     return {
         "saved": True,
         "total": len(questions),
@@ -354,6 +398,7 @@ def delete_question_bank(mentor_id: str, subject: str, semester: str) -> bool:
     except Exception:
         pass
 
+    _save_storage_file()
     return existed or db_deleted
 
 
@@ -405,6 +450,7 @@ def upsert_curriculum(
     except Exception as exc:
         print(f"[MongoDB] Notice during upsert_curriculum (saved in-memory): {exc}")
 
+    _save_storage_file()
     return {
         "saved": True,
         "key": key,
@@ -477,6 +523,7 @@ def delete_curriculum_from_db(mentor_id: str, key: str) -> bool:
     except Exception:
         pass
 
+    _save_storage_file()
     return existed or db_deleted
 
 
@@ -500,7 +547,9 @@ def save_student_report(report_doc: Dict) -> bool:
         return True
     except Exception as exc:
         print(f"[MongoDB] Notice saving student report (saved in-memory): {exc}")
-        return True
+
+    _save_storage_file()
+    return True
 
 
 def list_student_reports_for_mentor(mentor_id: str) -> List[Dict]:
