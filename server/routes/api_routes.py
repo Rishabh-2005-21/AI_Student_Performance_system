@@ -10,6 +10,7 @@ from controllers.controller import (
     class_dashboard_controller,
     curriculum_options_controller,
     delete_curriculum_controller,
+    delete_question_bank_controller,
     generate_questions_controller,
     get_question_bank_controller,
     mentor_dashboard_controller,
@@ -27,6 +28,7 @@ from controllers.controller import (
 )
 
 api_bp = Blueprint("api", __name__, url_prefix="/api")
+
 
 
 # ---------------------------------------------------------------------------
@@ -133,6 +135,13 @@ def save_question_bank_route():
 def get_question_bank_route():
     """Get question bank for a mentor/subject/semester."""
     return get_question_bank_controller()
+
+
+@api_bp.delete("/mentor/questions")
+def delete_question_bank_route():
+    """Delete a question bank for a mentor/subject/semester."""
+    return delete_question_bank_controller()
+
 
 
 # ---------------------------------------------------------------------------

@@ -528,6 +528,27 @@ def get_question_bank_controller():
     }), 200
 
 
+def delete_question_bank_controller():
+    """
+    DELETE /api/mentor/questions
+    Body: { mentor_id, subject, semester }
+    Deletes a saved test/question bank for a mentor.
+    """
+    data = request.get_json(force=True, silent=True) or {}
+    mentor_id = str(data.get("mentor_id", "")).strip()
+    subject   = str(data.get("subject", "")).strip()
+    semester  = str(data.get("semester", "")).strip()
+
+    if not mentor_id or not subject or not semester:
+        return jsonify({"error": "mentor_id, subject, and semester are required"}), 400
+
+    deleted = db_mongo.delete_question_bank(mentor_id, subject, semester)
+    if deleted:
+        return jsonify({"message": f"Test for {subject} (Sem {semester}) deleted successfully."}), 200
+    return jsonify({"error": "Test not found or could not be deleted."}), 404
+
+
+
 def student_questions_controller():
     """
     GET /api/student/questions?mentor_id=&subject=&semester=&count=10

@@ -38,6 +38,18 @@ def get_question_bank_col():
     return get_db()["question_bank"]
 
 
+def get_curriculum_col():
+    """Return the curriculum collection."""
+    return get_db()["curriculum"]
+
+
+def get_student_reports_col():
+    """Return the student_reports collection."""
+    return get_db()["student_reports"]
+
+
+
+
 # ---------------------------------------------------------------------------
 # Password helpers
 # ---------------------------------------------------------------------------
@@ -112,8 +124,14 @@ def seed_default_users() -> None:
             [("mentor_id", 1), ("subject", 1), ("semester", 1)],
             unique=True, background=True
         )
+        curr_col = get_curriculum_col()
+        curr_col.create_index(
+            [("mentor_id", 1), ("key", 1)],
+            unique=True, background=True
+        )
     except Exception:
         pass
+
 
 
 # ---------------------------------------------------------------------------
@@ -232,14 +250,141 @@ def get_approved_questions(mentor_id: str, subject: str, semester: str) -> List[
 
 
 def list_question_banks_for_mentor(mentor_id: str) -> List[Dict]:
-    """List all question bank entries for a mentor (summary only)."""
+    """List all question bank entries (tests/assignments) for a mentor with full questions."""
     try:
         col = get_question_bank_col()
         docs = list(col.find(
             {"mentor_id": mentor_id},
             {"_id": 0, "mentor_id": 1, "subject": 1, "semester": 1,
-             "total_approved": 1, "updated_at": 1}
+             "questions": 1, "total_approved": 1, "updated_at": 1}
+        ))
+        for d in docs:
+            d["total_questions"] = len(d.get("questions", []))
+        return docs
+    except Exception:
+        return []
+
+
+def delete_question_bank(mentor_id: str, subject: str, semester: str) -> bool:
+    """Delete a saved question bank for a mentor."""
+    try:
+        col = get_question_bank_col()
+        result = col.delete_one({"mentor_id": mentor_id, "subject": subject.lower(), "semester": str(semester)})
+        return result.deleted_count > 0
+    except Exception:
+        return False
+
+
+# ---------------------------------------------------------------------------
+# Curriculum / Syllabus (MongoDB-backed)
+# ---------------------------------------------------------------------------
+
+def upsert_curriculum(
+    mentor_id: str,
+    subject: str,
+    semester: str,
+    syllabus_text: str,
+    scheme_text: str,
+    topics: List[str],
+    question_types: List[str],
+) -> Dict:
+    """
+    Save or update a faculty member's uploaded syllabus curriculum in MongoDB.
+    """
+    col = get_curriculum_col()
+    key = f"{subject.lower()}::{str(semester).lower()}"
+    now = datetime.now(timezone.utc).isoformat()
+
+    doc = {
+        "mentor_id":      mentor_id,
+        "subject":        subject.lower(),
+        "semester":       str(semester).lower(),
+        "key":            key,
+        "syllabus_text":  syllabus_text,
+        "scheme_text":    scheme_text,
+        "topics":         topics,
+        "question_types": question_types,
+        "updated_at":     now,
+    }
+
+    result = col.update_one(
+        {"mentor_id": mentor_id, "key": key},
+        {"$set": doc},
+        upsert=True,
+    )
+    return {
+        "saved": True,
+        "key": key,
+        "mentor_id": mentor_id,
+        "modified": result.modified_count,
+        "upserted": result.upserted_id is not None,
+    }
+
+
+def fetch_curriculum(mentor_id: str, subject: str, semester: str) -> Optional[Dict]:
+    """Fetch curriculum document for a mentor/subject/semester."""
+    try:
+        col = get_curriculum_col()
+        key = f"{subject.lower()}::{str(semester).lower()}"
+        doc = col.find_one({"mentor_id": mentor_id, "key": key})
+        if doc:
+            doc["_id"] = str(doc["_id"])
+        return doc
+    except Exception:
+        return None
+
+
+def list_curriculum_for_mentor(mentor_id: str) -> List[Dict]:
+    """List all curriculum/syllabus documents for a specific faculty member."""
+    try:
+        col = get_curriculum_col()
+        docs = list(col.find(
+            {"mentor_id": mentor_id},
+            {"_id": 0, "mentor_id": 1, "subject": 1, "semester": 1, "key": 1,
+             "topics": 1, "question_types": 1, "updated_at": 1}
         ))
         return docs
     except Exception:
         return []
+
+
+def delete_curriculum_from_db(mentor_id: str, key: str) -> bool:
+    """Delete a curriculum entry for a faculty member from MongoDB."""
+    try:
+        col = get_curriculum_col()
+        result = col.delete_one({"mentor_id": mentor_id, "key": key})
+        return result.deleted_count > 0
+    except Exception:
+        return False
+
+
+# ---------------------------------------------------------------------------
+# Student Assessment Reports (MongoDB-backed)
+# ---------------------------------------------------------------------------
+
+def save_student_report(report_doc: Dict) -> bool:
+    """Save or update a completed student assessment report in MongoDB."""
+    try:
+        col = get_student_reports_col()
+        session_id = report_doc.get("session_id")
+        if not session_id:
+            return False
+        now = datetime.now(timezone.utc).isoformat()
+        report_doc["saved_at"] = now
+        col.update_one({"session_id": session_id}, {"$set": report_doc}, upsert=True)
+        return True
+    except Exception as exc:
+        print(f"[MongoDB] Error saving student report: {exc}")
+        return False
+
+
+def list_student_reports_for_mentor(mentor_id: str) -> List[Dict]:
+    """Retrieve all student assessment reports associated with a faculty mentor."""
+    try:
+        col = get_student_reports_col()
+        docs = list(col.find({"mentor_id": mentor_id}, {"_id": 0}))
+        return docs
+    except Exception:
+        return []
+
+

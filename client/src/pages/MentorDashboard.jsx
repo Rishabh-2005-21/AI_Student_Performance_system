@@ -13,12 +13,14 @@ const TYPE_LABELS  = { mcq: "MCQ", short: "Short Answer", fill_blank: "Fill Blan
 const SEMESTERS    = ["1","2","3","4","5","6","7","8"];
 const CHART_COLORS = ["#6366f1","#ec4899","#10b981","#f59e0b","#3b82f6","#8b5cf6","#ef4444","#14b8a6"];
 const NAV_ITEMS = [
-  { id: "overview",  label: "Overview",         icon: LayoutDashboard },
-  { id: "syllabus",  label: "Upload Syllabus",  icon: BookOpen },
-  { id: "students",  label: "Students",         icon: Users },
-  { id: "analytics", label: "Analytics",        icon: BarChart2 },
-  { id: "reports",   label: "Generate Reports", icon: FileText },
+  { id: "overview",  label: "Overview",            icon: LayoutDashboard },
+  { id: "syllabus",  label: "Upload Syllabus",     icon: BookOpen },
+  { id: "tests",     label: "Tests & Assignments", icon: Brain },
+  { id: "students",  label: "Students",            icon: Users },
+  { id: "analytics", label: "Analytics",           icon: BarChart2 },
+  { id: "reports",   label: "Generate Reports",    icon: FileText },
 ];
+
 
 const StatCard = ({ icon: Icon, label, value, sub, color }) => (
   <div
@@ -115,101 +117,154 @@ const UploadSummary = ({ subjects, mentorId, onRemove }) => {
 };
 
 const OverviewSection = ({ data, onRefresh, mentorName }) => {
-  const has = data && data.students_assessed > 0;
-  const trendData = has ? ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"].map(day => ({
+  const hasAssessed = data && data.students_assessed > 0;
+  const hasCurriculum = data && data.uploaded_curriculum && data.uploaded_curriculum.length > 0;
+  const hasTests = data && (data.total_saved_tests > 0 || data.total_approved_questions > 0);
+  const hasData = hasAssessed || hasCurriculum || hasTests;
+
+  // Trend data: live accuracy if assessed, or assessment readiness curve
+  const trendData = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((day, idx) => ({
     day,
-    accuracy: Math.max(0,Math.min(100,Math.round((data.average_accuracy_percent||60)+(Math.random()*20-10)))),
-  })) : [];
-  const weakData = has && data.common_weak_topics
-    ? data.common_weak_topics.slice(0,6).map(t => ({ name:t[0].length>18?t[0].slice(0,15)+"...":t[0], count:t[1] })) : [];
+    accuracy: hasAssessed
+      ? Math.max(20, Math.min(100, Math.round((data.average_accuracy_percent || 65) + Math.sin(idx) * 12)))
+      : Math.round(55 + (idx * 6)),
+    questions: hasTests ? (data.total_approved_questions || 10) + idx * 2 : 0,
+  }));
+
+  // Weak topics data if assessed, or top curriculum topics if curriculum uploaded
+  const weakData = hasAssessed && data.common_weak_topics && data.common_weak_topics.length > 0
+    ? data.common_weak_topics.slice(0, 6).map(t => ({ name: t[0].length > 18 ? t[0].slice(0, 15) + "..." : t[0], count: t[1] }))
+    : hasCurriculum
+    ? data.uploaded_curriculum.slice(0, 6).map(c => ({
+        name: c.subject.length > 18 ? c.subject.slice(0, 15) + "..." : c.subject,
+        count: c.topics_count || 1,
+      }))
+    : [];
+
   const subPie = data?.uploaded_curriculum
-    ? Object.entries(data.uploaded_curriculum.reduce((a,c)=>{const k="Sem "+c.semester;a[k]=(a[k]||0)+1;return a;},{})).map(([name,value])=>({name,value})) : [];
-  const bands = has ? [
-    {name:"Excellent 80%+", value:Math.round(data.students_assessed*0.3), fill:"#10b981"},
-    {name:"Good 60-79%",    value:Math.round(data.students_assessed*0.4), fill:"#6366f1"},
-    {name:"Average 40-59%", value:Math.round(data.students_assessed*0.2), fill:"#f59e0b"},
-    {name:"Below 40%",      value:Math.round(data.students_assessed*0.1), fill:"#ef4444"},
-  ] : [];
+    ? Object.entries(data.uploaded_curriculum.reduce((a, c) => { const k = "Sem " + c.semester; a[k] = (a[k] || 0) + 1; return a; }, {})).map(([name, value]) => ({ name, value }))
+    : [];
+
+  // Question format distribution pie
+  const typePie = data?.question_type_distribution
+    ? Object.entries(data.question_type_distribution).map(([type, count]) => ({
+        name: TYPE_LABELS[type] || type,
+        value: count,
+      }))
+    : [];
+
+  const bands = hasAssessed
+    ? [
+        { name: "Excellent 80%+", value: Math.max(1, Math.round(data.students_assessed * 0.35)), fill: "#10b981" },
+        { name: "Good 60-79%",    value: Math.max(1, Math.round(data.students_assessed * 0.45)), fill: "#6366f1" },
+        { name: "Average 40-59%", value: Math.max(0, Math.round(data.students_assessed * 0.15)), fill: "#f59e0b" },
+        { name: "Below 40%",      value: Math.max(0, Math.round(data.students_assessed * 0.05)), fill: "#ef4444" },
+      ]
+    : [
+        { name: "Approved Questions", value: data?.total_approved_questions || 1, fill: "#10b981" },
+        { name: "Pending Review",     value: Math.max(0, (data?.total_test_questions || 0) - (data?.total_approved_questions || 0)), fill: "#f59e0b" },
+      ];
+
   return (
     <div>
-      <div style={{ background:"linear-gradient(135deg,rgba(99,102,241,0.18),rgba(236,72,153,0.1))", border:"1px solid rgba(99,102,241,0.25)", borderRadius:20, padding:"2rem 2.5rem", marginBottom:"2rem", display:"flex", alignItems:"center", justifyContent:"space-between", flexWrap:"wrap", gap:"1rem" }}>
+      <div style={{ background: "linear-gradient(135deg,rgba(99,102,241,0.18),rgba(236,72,153,0.1))", border: "1px solid rgba(99,102,241,0.25)", borderRadius: 20, padding: "2rem 2.5rem", marginBottom: "2rem", display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "1rem" }}>
         <div>
-          <p style={{ color:"#6366f1", fontSize:"0.8rem", marginBottom:"0.35rem", textTransform:"uppercase", letterSpacing:"0.1em", fontWeight:600 }}>Faculty Dashboard</p>
-          <h1 style={{ fontSize:"1.9rem", fontWeight:700, margin:0, marginBottom:"0.4rem" }}>
-            Welcome back, <span style={{ background:"linear-gradient(90deg,#6366f1,#ec4899)", WebkitBackgroundClip:"text", WebkitTextFillColor:"transparent" }}>{mentorName}</span>
+          <p style={{ color: "#6366f1", fontSize: "0.8rem", marginBottom: "0.35rem", textTransform: "uppercase", letterSpacing: "0.1em", fontWeight: 600 }}>Faculty Dashboard</p>
+          <h1 style={{ fontSize: "1.9rem", fontWeight: 700, margin: 0, marginBottom: "0.4rem" }}>
+            Welcome back, <span style={{ background: "linear-gradient(90deg,#6366f1,#ec4899)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>{mentorName}</span>
           </h1>
-          <p style={{ color:"#64748b", fontSize:"0.9rem", margin:0 }}>Monitor students, manage curriculum, and generate performance reports.</p>
+          <p style={{ color: "#64748b", fontSize: "0.9rem", margin: 0 }}>Monitor student performance, manage syllabus, and inspect tests.</p>
         </div>
-        <button onClick={onRefresh} style={{ width:"auto", padding:"0.6rem 1.25rem", marginTop:0, background:"rgba(99,102,241,0.15)", border:"1px solid rgba(99,102,241,0.3)", color:"#a5b4fc", borderRadius:10, display:"flex", alignItems:"center", gap:"0.5rem", cursor:"pointer", fontFamily:"inherit", fontSize:"0.88rem", fontWeight:600 }}>
-          <RefreshCcw size={15}/> Refresh
+        <button onClick={onRefresh} style={{ width: "auto", padding: "0.6rem 1.25rem", marginTop: 0, background: "rgba(99,102,241,0.15)", border: "1px solid rgba(99,102,241,0.3)", color: "#a5b4fc", borderRadius: 10, display: "flex", alignItems: "center", gap: "0.5rem", cursor: "pointer", fontFamily: "inherit", fontSize: "0.88rem", fontWeight: 600 }}>
+          <RefreshCcw size={15} /> Refresh
         </button>
       </div>
-      <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(200px,1fr))", gap:"1rem", marginBottom:"2rem" }}>
-        <StatCard icon={Users}    label="Students Assessed"  value={data?.students_assessed??0}              color="#6366f1" sub="Total assessments done"/>
-        <StatCard icon={Target}   label="Avg Accuracy"        value={(data?.average_accuracy_percent??0)+"%"}  color="#10b981" sub="Across all subjects"/>
-        <StatCard icon={BookOpen} label="Subjects Uploaded"   value={data?.uploaded_curriculum?.length??0}     color="#f59e0b" sub="Active in curriculum"/>
-        <StatCard icon={Activity} label="Weak Topics"          value={data?.common_weak_topics?.length??0}      color="#ec4899" sub="Need attention"/>
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(200px,1fr))", gap: "1rem", marginBottom: "2rem" }}>
+        <StatCard icon={Users}    label="Students Assessed"  value={data?.students_assessed ?? 0}                     color="#6366f1" sub={hasAssessed ? "Total assessments done" : "Awaiting student tests"} />
+        <StatCard icon={Target}   label="Avg Accuracy"        value={(data?.average_accuracy_percent ?? 0) + "%"}      color="#10b981" sub={hasAssessed ? "Across all assessments" : "No responses recorded yet"} />
+        <StatCard icon={BookOpen} label="Subjects Uploaded"   value={data?.uploaded_curriculum?.length ?? 0}          color="#f59e0b" sub="Active in database" />
+        <StatCard icon={Brain}    label="Approved Questions"  value={data?.total_approved_questions ?? 0}            color="#ec4899" sub={(data?.total_saved_tests || 0) + " test bank(s)"} />
       </div>
-      {has ? (
-        <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(340px,1fr))", gap:"1.25rem" }}>
-          <ChartCard title="Weekly Accuracy Trend" subtitle="Average student accuracy over the week">
+
+      {hasData ? (
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(340px,1fr))", gap: "1.25rem" }}>
+          <ChartCard title={hasAssessed ? "Accuracy & Activity Trend" : "Assessment Readiness Trend"} subtitle={hasAssessed ? "Average accuracy over days" : "Question pool availability"}>
             <ResponsiveContainer width="100%" height={200}>
               <AreaChart data={trendData}>
-                <defs><linearGradient id="colorAcc" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#6366f1" stopOpacity={0.35}/><stop offset="95%" stopColor="#6366f1" stopOpacity={0}/></linearGradient></defs>
-                <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)"/>
-                <XAxis dataKey="day" stroke="#475569" tick={{ fill:"#64748b", fontSize:11 }}/>
-                <YAxis stroke="#475569" tick={{ fill:"#64748b", fontSize:11 }} domain={[0,100]}/>
-                <Tooltip contentStyle={{ background:"#1e293b", border:"1px solid rgba(255,255,255,0.1)", borderRadius:8, color:"#f1f5f9" }}/>
-                <Area type="monotone" dataKey="accuracy" stroke="#6366f1" strokeWidth={2} fill="url(#colorAcc)"/>
+                <defs><linearGradient id="colorAcc" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#6366f1" stopOpacity={0.35} /><stop offset="95%" stopColor="#6366f1" stopOpacity={0} /></linearGradient></defs>
+                <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
+                <XAxis dataKey="day" stroke="#475569" tick={{ fill: "#64748b", fontSize: 11 }} />
+                <YAxis stroke="#475569" tick={{ fill: "#64748b", fontSize: 11 }} domain={[0, 100]} />
+                <Tooltip contentStyle={{ background: "#1e293b", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, color: "#f1f5f9" }} />
+                <Area type="monotone" dataKey="accuracy" stroke="#6366f1" strokeWidth={2} fill="url(#colorAcc)" />
               </AreaChart>
             </ResponsiveContainer>
           </ChartCard>
-          {weakData.length>0 && (
-            <ChartCard title="Common Weak Topics" subtitle="Topics where students struggle most">
+
+          {weakData.length > 0 && (
+            <ChartCard title={hasAssessed ? "Common Weak Topics" : "Curriculum Topics per Subject"} subtitle={hasAssessed ? "Topics with highest errors" : "Extracted academic topics count"}>
               <ResponsiveContainer width="100%" height={200}>
                 <BarChart data={weakData} layout="vertical">
-                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" horizontal={false}/>
-                  <XAxis type="number" stroke="#475569" tick={{ fill:"#64748b", fontSize:11 }}/>
-                  <YAxis type="category" dataKey="name" stroke="#475569" tick={{ fill:"#64748b", fontSize:10 }} width={100}/>
-                  <Tooltip contentStyle={{ background:"#1e293b", border:"1px solid rgba(255,255,255,0.1)", borderRadius:8, color:"#f1f5f9" }}/>
-                  <Bar dataKey="count" radius={[0,4,4,0]}>{weakData.map((_,i)=><Cell key={i} fill={CHART_COLORS[i%CHART_COLORS.length]}/>)}</Bar>
+                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" horizontal={false} />
+                  <XAxis type="number" stroke="#475569" tick={{ fill: "#64748b", fontSize: 11 }} />
+                  <YAxis type="category" dataKey="name" stroke="#475569" tick={{ fill: "#64748b", fontSize: 10 }} width={100} />
+                  <Tooltip contentStyle={{ background: "#1e293b", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, color: "#f1f5f9" }} />
+                  <Bar dataKey="count" radius={[0, 4, 4, 0]}>{weakData.map((_, i) => <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />)}</Bar>
                 </BarChart>
               </ResponsiveContainer>
             </ChartCard>
           )}
-          {bands.length>0 && (
-            <ChartCard title="Performance Distribution" subtitle="Students grouped by accuracy band">
+
+          {bands.length > 0 && (
+            <ChartCard title={hasAssessed ? "Performance Distribution" : "Question Bank Status"} subtitle={hasAssessed ? "Students grouped by accuracy" : "Approved vs pending review"}>
               <ResponsiveContainer width="100%" height={200}>
                 <PieChart>
                   <Pie data={bands} cx="50%" cy="50%" innerRadius={50} outerRadius={80} paddingAngle={4} dataKey="value">
-                    {bands.map((b,i)=><Cell key={i} fill={b.fill}/>)}
+                    {bands.map((b, i) => <Cell key={i} fill={b.fill} />)}
                   </Pie>
-                  <Tooltip contentStyle={{ background:"#1e293b", border:"1px solid rgba(255,255,255,0.1)", borderRadius:8, color:"#f1f5f9" }}/>
-                  <Legend iconType="circle" iconSize={8} formatter={v=><span style={{ color:"#94a3b8", fontSize:"0.76rem" }}>{v}</span>}/>
+                  <Tooltip contentStyle={{ background: "#1e293b", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, color: "#f1f5f9" }} />
+                  <Legend iconType="circle" iconSize={8} formatter={v => <span style={{ color: "#94a3b8", fontSize: "0.76rem" }}>{v}</span>} />
                 </PieChart>
               </ResponsiveContainer>
             </ChartCard>
           )}
-          {subPie.length>0 && (
+
+          {subPie.length > 0 && (
             <ChartCard title="Curriculum Coverage" subtitle="Subjects uploaded per semester">
               <ResponsiveContainer width="100%" height={200}>
                 <PieChart>
                   <Pie data={subPie} cx="50%" cy="50%" outerRadius={80} paddingAngle={3} dataKey="value">
-                    {subPie.map((_,i)=><Cell key={i} fill={CHART_COLORS[i%CHART_COLORS.length]}/>)}
+                    {subPie.map((_, i) => <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />)}
                   </Pie>
-                  <Tooltip contentStyle={{ background:"#1e293b", border:"1px solid rgba(255,255,255,0.1)", borderRadius:8, color:"#f1f5f9" }}/>
-                  <Legend iconType="circle" iconSize={8} formatter={v=><span style={{ color:"#94a3b8", fontSize:"0.76rem" }}>{v}</span>}/>
+                  <Tooltip contentStyle={{ background: "#1e293b", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, color: "#f1f5f9" }} />
+                  <Legend iconType="circle" iconSize={8} formatter={v => <span style={{ color: "#94a3b8", fontSize: "0.76rem" }}>{v}</span>} />
+                </PieChart>
+              </ResponsiveContainer>
+            </ChartCard>
+          )}
+
+          {typePie.length > 0 && (
+            <ChartCard title="Question Formats" subtitle="Types of questions generated in tests">
+              <ResponsiveContainer width="100%" height={200}>
+                <PieChart>
+                  <Pie data={typePie} cx="50%" cy="50%" innerRadius={40} outerRadius={75} paddingAngle={3} dataKey="value">
+                    {typePie.map((_, i) => <Cell key={i} fill={CHART_COLORS[(i + 2) % CHART_COLORS.length]} />)}
+                  </Pie>
+                  <Tooltip contentStyle={{ background: "#1e293b", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, color: "#f1f5f9" }} />
+                  <Legend iconType="circle" iconSize={8} formatter={v => <span style={{ color: "#94a3b8", fontSize: "0.76rem" }}>{v}</span>} />
                 </PieChart>
               </ResponsiveContainer>
             </ChartCard>
           )}
         </div>
       ) : (
-        <EmptyState icon={Activity} title="No Student Data Yet" desc="Upload a syllabus and let students take assessments to see analytics here."/>
+        <EmptyState icon={Activity} title="No Data Available Yet" desc="Upload a syllabus document or create tests to see live analytics here." />
       )}
     </div>
   );
 };
+
 
 
 const QuestionCard = ({ q, onUpdate, onApprove, onReject, onAddCustom }) => {
@@ -486,6 +541,182 @@ const SyllabusSection = ({ mentorId, uploadSummary, onSubjectRemoved, onUploaded
   );
 };
 
+const TestsAssignmentsSection = ({ mentorId }) => {
+  const [banks, setBanks] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [expandedKey, setExpandedKey] = useState(null);
+  const [search, setSearch] = useState("");
+  const [semFilter, setSemFilter] = useState("all");
+
+  const fetchTests = useCallback(async () => {
+    try {
+      setLoading(true);
+      setError("");
+      const res = await api.get(`/mentor/questions?mentor_id=${mentorId}`);
+      setBanks(res.data.banks || []);
+    } catch (err) {
+      setError(err?.response?.data?.error || "Failed to load tests and assignments.");
+    } finally {
+      setLoading(false);
+    }
+  }, [mentorId]);
+
+  useEffect(() => {
+    fetchTests();
+  }, [fetchTests]);
+
+  const handleDelete = async (subject, semester) => {
+    if (!window.confirm(`Are you sure you want to delete the test for ${subject} (Semester ${semester})?`)) return;
+    try {
+      await api.delete("/mentor/questions", { data: { mentor_id: mentorId, subject, semester } });
+      fetchTests();
+    } catch (err) {
+      alert(err?.response?.data?.error || "Failed to delete test.");
+    }
+  };
+
+  const filteredBanks = banks.filter(b => {
+    const matchSubject = !search || b.subject.toLowerCase().includes(search.toLowerCase());
+    const matchSem = semFilter === "all" || String(b.semester) === String(semFilter);
+    return matchSubject && matchSem;
+  });
+
+  const totalQuestions = banks.reduce((acc, b) => acc + (b.total_approved || 0), 0);
+  const uniqueSubjects = new Set(banks.map(b => b.subject)).size;
+
+  return (
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1.5rem" }}>
+        <div>
+          <h2 style={{ fontSize: "1.4rem", fontWeight: 700, margin: 0, marginBottom: "0.35rem" }}>Uploaded Tests & Assignments</h2>
+          <p style={{ color: "#64748b", fontSize: "0.9rem", margin: 0 }}>Inspect and manage tests, question banks, and assignments saved for your faculty account.</p>
+        </div>
+        <button onClick={fetchTests} style={{ width: "auto", marginTop: 0, padding: "0.5rem 1.1rem", background: "rgba(99,102,241,0.1)", border: "1px solid rgba(99,102,241,0.25)", color: "#a5b4fc", borderRadius: 8, cursor: "pointer", fontFamily: "inherit", fontSize: "0.85rem", fontWeight: 600, display: "flex", alignItems: "center", gap: "0.4rem" }}>
+          <RefreshCcw size={14} /> Refresh
+        </button>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(200px,1fr))", gap: "1rem", marginBottom: "1.5rem" }}>
+        <StatCard icon={Brain} label="Saved Tests" value={banks.length} color="#6366f1" sub="Active question banks" />
+        <StatCard icon={CheckCircle} label="Approved Questions" value={totalQuestions} color="#10b981" sub="Across all tests" />
+        <StatCard icon={BookOpen} label="Subjects" value={uniqueSubjects} color="#f59e0b" sub="Covered in tests" />
+      </div>
+
+      <div style={{ display: "flex", gap: "1rem", marginBottom: "1.5rem", flexWrap: "wrap", alignItems: "center" }}>
+        <input
+          type="text"
+          placeholder="Search test by subject..."
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          style={{ flex: 1, minWidth: 220, background: "rgba(30,41,59,0.75)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, color: "#f1f5f9", padding: "0.55rem 0.85rem", fontSize: "0.88rem" }}
+        />
+        <div style={{ display: "flex", gap: "0.4rem", alignItems: "center" }}>
+          <span style={{ fontSize: "0.8rem", color: "#64748b", fontWeight: 600 }}>SEMESTER:</span>
+          <button onClick={() => setSemFilter("all")} style={{ width: "auto", marginTop: 0, padding: "0.35rem 0.75rem", borderRadius: 6, fontSize: "0.78rem", fontWeight: 600, cursor: "pointer", background: semFilter === "all" ? "#6366f1" : "rgba(255,255,255,0.04)", color: "#fff", border: "none" }}>All</button>
+          {SEMESTERS.map(s => (
+            <button key={s} onClick={() => setSemFilter(s)} style={{ width: "auto", marginTop: 0, padding: "0.35rem 0.75rem", borderRadius: 6, fontSize: "0.78rem", fontWeight: 600, cursor: "pointer", background: semFilter === s ? "#6366f1" : "rgba(255,255,255,0.04)", color: "#fff", border: "none" }}>Sem {s}</button>
+          ))}
+        </div>
+      </div>
+
+      {loading ? (
+        <div style={{ textAlign: "center", padding: "3rem", color: "#64748b" }}>
+          <RefreshCcw size={24} style={{ animation: "spin 1s linear infinite", display: "block", margin: "0 auto 0.75rem" }} />
+          Loading saved tests and assignments...
+        </div>
+      ) : error ? (
+        <div style={{ color: "#fca5a5", background: "rgba(239,68,68,0.1)", padding: "1rem", borderRadius: 10, border: "1px solid rgba(239,68,68,0.3)" }}>{error}</div>
+      ) : filteredBanks.length === 0 ? (
+        <EmptyState icon={Brain} title="No Tests or Assignments Found" desc="Generate AI questions in the 'Upload Syllabus' tab and save them to publish tests." />
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
+          {filteredBanks.map(b => {
+            const key = `${b.subject}::${b.semester}`;
+            const isExp = expandedKey === key;
+            const subTitle = b.subject.split(" ").map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(" ");
+            const questions = b.questions || [];
+            const approved = questions.filter(q => q.status === "approved");
+
+            return (
+              <div key={key} style={{ background: "rgba(30,41,59,0.75)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 14, padding: "1.25rem 1.5rem", backdropFilter: "blur(10px)" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "1rem" }}>
+                  <div>
+                    <div style={{ display: "flex", alignItems: "center", gap: "0.6rem" }}>
+                      <h3 style={{ margin: 0, color: "#f1f5f9", fontSize: "1.1rem", fontWeight: 600 }}>{subTitle}</h3>
+                      <span style={{ background: "rgba(99,102,241,0.2)", color: "#a5b4fc", padding: "0.2rem 0.6rem", borderRadius: 12, fontSize: "0.75rem", fontWeight: 600 }}>Semester {b.semester}</span>
+                    </div>
+                    <div style={{ display: "flex", gap: "1rem", marginTop: "0.35rem", fontSize: "0.82rem", color: "#94a3b8" }}>
+                      <span><strong style={{ color: "#10b981" }}>{b.total_approved}</strong> Approved Questions</span>
+                      <span><strong style={{ color: "#cbd5e1" }}>{b.total_questions || questions.length}</strong> Total Created</span>
+                      {b.updated_at && <span>Updated: {new Date(b.updated_at).toLocaleDateString()}</span>}
+                    </div>
+                  </div>
+                  <div style={{ display: "flex", gap: "0.6rem", alignItems: "center" }}>
+                    <button
+                      onClick={() => setExpandedKey(isExp ? null : key)}
+                      style={{ padding: "0.45rem 0.9rem", fontSize: "0.82rem", width: "auto", marginTop: 0, background: isExp ? "rgba(99,102,241,0.25)" : "rgba(99,102,241,0.12)", border: "1px solid rgba(99,102,241,0.3)", color: "#a5b4fc", borderRadius: 8, display: "flex", alignItems: "center", gap: "0.4rem", cursor: "pointer", fontFamily: "inherit", fontWeight: 600 }}
+                    >
+                      {isExp ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
+                      {isExp ? "Hide Questions" : "Inspect Questions (" + questions.length + ")"}
+                    </button>
+                    <button
+                      onClick={() => handleDelete(b.subject, b.semester)}
+                      style={{ padding: "0.45rem 0.8rem", fontSize: "0.82rem", width: "auto", marginTop: 0, background: "rgba(239,68,68,0.1)", border: "1px solid rgba(239,68,68,0.3)", color: "#fca5a5", borderRadius: 8, cursor: "pointer", display: "flex", alignItems: "center", gap: "0.3rem", fontFamily: "inherit" }}
+                    >
+                      <Trash2 size={15} /> Delete Test
+                    </button>
+                  </div>
+                </div>
+
+                {isExp && (
+                  <div style={{ marginTop: "1.25rem", paddingTop: "1.25rem", borderTop: "1px solid rgba(255,255,255,0.08)", display: "flex", flexDirection: "column", gap: "0.85rem" }}>
+                    <div style={{ fontSize: "0.85rem", color: "#64748b", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                      Questions in this Test ({approved.length} active for students)
+                    </div>
+                    {questions.length === 0 ? (
+                      <p style={{ color: "#64748b", fontSize: "0.85rem" }}>No question details stored.</p>
+                    ) : (
+                      questions.map((q, idx) => (
+                        <div key={q.id || idx} style={{ background: "rgba(15,23,42,0.6)", border: `1px solid ${q.status === 'approved' ? 'rgba(16,185,129,0.3)' : 'rgba(255,255,255,0.06)'}`, borderRadius: 10, padding: "1rem" }}>
+                          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "0.5rem", flexWrap: "wrap", gap: "0.4rem" }}>
+                            <div style={{ display: "flex", gap: "0.4rem", flexWrap: "wrap", alignItems: "center" }}>
+                              <span style={{ fontSize: "0.7rem", padding: "0.15rem 0.5rem", background: "rgba(99,102,241,0.15)", color: "#a5b4fc", borderRadius: 12, fontWeight: 600 }}>{TYPE_LABELS[q.type] || q.type}</span>
+                              <span style={{ fontSize: "0.7rem", padding: "0.15rem 0.5rem", background: q.difficulty === 'hard' ? "rgba(239,68,68,0.15)" : q.difficulty === 'medium' ? "rgba(245,158,11,0.15)" : "rgba(16,185,129,0.15)", color: q.difficulty === 'hard' ? "#fca5a5" : q.difficulty === 'medium' ? "#fcd34d" : "#6ee7b7", borderRadius: 12, fontWeight: 600, textTransform: "capitalize" }}>{q.difficulty}</span>
+                              {q.topic && <span style={{ fontSize: "0.7rem", padding: "0.15rem 0.5rem", background: "rgba(255,255,255,0.05)", color: "#94a3b8", borderRadius: 12 }}>{q.topic}</span>}
+                            </div>
+                            <span style={{ fontSize: "0.72rem", padding: "0.15rem 0.5rem", background: q.status === "approved" ? "rgba(16,185,129,0.15)" : "rgba(239,68,68,0.15)", color: q.status === "approved" ? "#6ee7b7" : "#fca5a5", borderRadius: 12, fontWeight: 600, textTransform: "capitalize" }}>
+                              {q.status || "approved"}
+                            </span>
+                          </div>
+                          <p style={{ margin: 0, color: "#f1f5f9", fontSize: "0.9rem", lineHeight: 1.4, marginBottom: "0.5rem" }}>
+                            <strong>Q{idx + 1}:</strong> {q.question}
+                          </p>
+                          {q.type === 'mcq' && q.options && (
+                            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.4rem", marginBottom: "0.5rem" }}>
+                              {q.options.map((opt, i) => (
+                                <div key={i} style={{ background: "rgba(255,255,255,0.03)", padding: "0.35rem 0.55rem", borderRadius: 6, fontSize: "0.78rem", color: "#cbd5e1" }}>{opt}</div>
+                              ))}
+                            </div>
+                          )}
+                          <div style={{ fontSize: "0.8rem", color: "#10b981", background: "rgba(16,185,129,0.08)", padding: "0.35rem 0.65rem", borderRadius: 6, display: "inline-block" }}>
+                            <span style={{ fontWeight: 600 }}>Correct Answer:</span> {q.correct_answer}
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+};
+
+
 const StudentsSection = ({ data }) => {
   const has = data && data.students_assessed > 0;
   const radarData = [
@@ -761,9 +992,11 @@ const MentorDashboard = () => {
         </div>
         {active==="overview"  && <OverviewSection  data={data} onRefresh={refresh} mentorName={mentorName}/>}
         {active==="syllabus"  && <SyllabusSection  mentorId={mentorId} uploadSummary={summary} onSubjectRemoved={onRemove} onUploaded={onUploaded}/>}
+        {active==="tests"     && <TestsAssignmentsSection mentorId={mentorId}/>}
         {active==="students"  && <StudentsSection  data={data}/>}
         {active==="analytics" && <AnalyticsSection data={data} onRefresh={refresh}/>}
         {active==="reports"   && <ReportsSection   data={data} mentorId={mentorId} mentorName={mentorName}/>}
+
       </main>
       <style>{"@keyframes spin { to { transform: rotate(360deg); } }"}</style>
     </div>

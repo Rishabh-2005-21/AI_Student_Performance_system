@@ -8,6 +8,7 @@ import uuid
 from collections import Counter, defaultdict
 from typing import Dict, List, Optional
 
+import db_mongo
 from ai_engine.evaluator import (
     calculate_weighted_score,
     confidence_bucket,
@@ -25,6 +26,33 @@ SESSIONS: Dict[str, Dict] = {}
 CLASS_SESSIONS: List[str] = []
 MENTORS: Dict[str, str] = {"MTR001": "mentor123", "MTR002": "college@123"}
 MENTOR_CURRICULUM: Dict[str, Dict] = {}
+
+
+def _get_mentor_curriculum_dict(mentor_id: str) -> Dict[str, Dict]:
+    """
+    Retrieve mentor curriculum dictionary combining MongoDB database records
+    and in-memory cached entries.
+    """
+    combined = dict(MENTOR_CURRICULUM.get(mentor_id, {}))
+    try:
+        db_entries = db_mongo.list_curriculum_for_mentor(mentor_id)
+        for doc in db_entries:
+            key = doc.get("key") or f"{doc['subject'].lower()}::{doc['semester'].lower()}"
+            if key not in combined:
+                # Fetch full doc if syllabus_text is needed
+                full_doc = db_mongo.fetch_curriculum(mentor_id, doc["subject"], doc["semester"]) or doc
+                combined[key] = {
+                    "subject": doc["subject"].lower(),
+                    "semester": str(doc["semester"]).lower(),
+                    "syllabus_text": full_doc.get("syllabus_text", ""),
+                    "scheme_text": full_doc.get("scheme_text", ""),
+                    "topics": doc.get("topics", []),
+                    "question_types": doc.get("question_types", ["mcq", "short"]),
+                }
+    except Exception as exc:
+        print(f"[Service] Error fetching curriculum from MongoDB: {exc}")
+    return combined
+
 
 
 def get_subjects() -> List[Dict[str, str]]:
@@ -104,6 +132,20 @@ def upload_curriculum(
         "topics": topics,
         "question_types": question_types,
     }
+    # Persist to MongoDB under mentor_id
+    try:
+        db_mongo.upsert_curriculum(
+            mentor_id=mentor_id,
+            subject=subject,
+            semester=semester,
+            syllabus_text=syllabus_text,
+            scheme_text=scheme_text,
+            topics=topics,
+            question_types=question_types,
+        )
+    except Exception as exc:
+        print(f"[Service] Warning: Could not save curriculum to MongoDB: {exc}")
+
     return {
         "message": "Curriculum uploaded successfully",
         "mentor_id": mentor_id,
@@ -112,6 +154,7 @@ def upload_curriculum(
         "topics_count": str(len(topics)),
         "question_types": question_types,
     }
+
 
 
 def _is_clean_english_topic(text: str) -> bool:
@@ -288,6 +331,20 @@ def upload_curriculum_from_pdf_text(
             "topics": topics,
             "question_types": question_types,
         }
+        # Persist syllabus to MongoDB under mentor_id
+        try:
+            db_mongo.upsert_curriculum(
+                mentor_id=mentor_id,
+                subject=subject,
+                semester=semester,
+                syllabus_text=full_course_text,
+                scheme_text="",
+                topics=topics,
+                question_types=question_types,
+            )
+        except Exception as exc:
+            print(f"[Service] Warning: Could not save curriculum to MongoDB: {exc}")
+
         saved_subjects.append({
             "subject": subject.lower(),
             "semester": semester.lower(),
@@ -310,8 +367,9 @@ def curriculum_options_for_mentor(mentor_id: str) -> Dict:
     if mentor_id not in MENTORS:
         raise ValueError("Mentor not found")
 
+    mentor_dict = _get_mentor_curriculum_dict(mentor_id)
     options = []
-    for key, item in MENTOR_CURRICULUM.get(mentor_id, {}).items():
+    for key, item in mentor_dict.items():
         options.append({
             "key": key,
             "subject": item["subject"],
@@ -328,10 +386,11 @@ def delete_curriculum_entry(mentor_id: str, key: str) -> Dict:
     if mentor_id not in MENTORS:
         raise ValueError("Mentor not found")
     mentor_data = MENTOR_CURRICULUM.get(mentor_id, {})
-    if key not in mentor_data:
-        raise ValueError(f"Curriculum entry '{key}' not found")
-    del mentor_data[key]
+    if key in mentor_data:
+        del mentor_data[key]
+    db_mongo.delete_curriculum_from_db(mentor_id, key)
     return {"message": f"Entry '{key}' removed successfully"}
+
 
 
 def _build_questions_from_curriculum(
@@ -456,7 +515,7 @@ def start_mentor_session(
         )
 
     key = f"{subject.lower()}::{semester.lower()}"
-    mentor_data = MENTOR_CURRICULUM.get(mentor_id, {})
+    mentor_data = _get_mentor_curriculum_dict(mentor_id)
     curriculum = mentor_data.get(key)
     if not curriculum:
         raise ValueError(
@@ -489,15 +548,30 @@ def mentor_dashboard(mentor_id: str) -> Dict:
     if mentor_id not in MENTORS:
         raise ValueError("Mentor not found")
 
-    reports = []
+    # Combine active memory sessions with MongoDB student reports
+    reports_map = {}
+
+    # 1. Fetch from MongoDB
+    try:
+        db_reports = db_mongo.list_student_reports_for_mentor(mentor_id)
+        for r in db_reports:
+            if r.get("session_id"):
+                reports_map[r["session_id"]] = r
+    except Exception as exc:
+        print(f"[Service] Error listing student reports from MongoDB: {exc}")
+
+    # 2. Add active memory sessions
     for sid in CLASS_SESSIONS:
         session = SESSIONS.get(sid)
-        if not session or session.get("mentor_id") != mentor_id or not session["responses"]:
-            continue
-        reports.append(generate_report(sid))
+        if session and session.get("mentor_id") == mentor_id and session.get("responses"):
+            rep = generate_report(sid)
+            reports_map[sid] = rep
+
+    reports = list(reports_map.values())
 
     uploaded = []
-    for key, value in MENTOR_CURRICULUM.get(mentor_id, {}).items():
+    mentor_dict = _get_mentor_curriculum_dict(mentor_id)
+    for key, value in mentor_dict.items():
         uploaded.append(
             {
                 "key": key,
@@ -508,23 +582,37 @@ def mentor_dashboard(mentor_id: str) -> Dict:
             }
         )
 
-    if not reports:
-        return {
-            "mentor_id": mentor_id,
-            "uploaded_curriculum": uploaded,
-            "students_assessed": 0,
-            "message": "No student responses yet",
-        }
+    # Saved question banks / tests
+    saved_banks = db_mongo.list_question_banks_for_mentor(mentor_id)
+    total_approved_questions = sum(b.get("total_approved", 0) for b in saved_banks)
+    total_test_questions = sum(b.get("total_questions", len(b.get("questions", []))) for b in saved_banks)
 
-    avg_accuracy = sum(r["overall_accuracy_percent"] for r in reports) / len(reports)
-    weak_topics = Counter(topic for report in reports for topic in report["weaknesses"])
+    # Compute question format distribution
+    type_counts = Counter()
+    for b in saved_banks:
+        for q in b.get("questions", []):
+            type_counts[q.get("type", "mcq")] += 1
+
+    if not reports:
+        avg_acc = 0.0
+        weak_list = []
+    else:
+        avg_acc = round(sum(r["overall_accuracy_percent"] for r in reports) / len(reports), 2)
+        weak_counter = Counter(topic for report in reports for topic in report.get("weaknesses", []))
+        weak_list = weak_counter.most_common(5)
 
     return {
         "mentor_id": mentor_id,
         "uploaded_curriculum": uploaded,
+        "saved_tests": saved_banks,
+        "total_saved_tests": len(saved_banks),
+        "total_approved_questions": total_approved_questions,
+        "total_test_questions": total_test_questions,
+        "question_type_distribution": dict(type_counts),
         "students_assessed": len(reports),
-        "average_accuracy_percent": round(avg_accuracy, 2),
-        "common_weak_topics": weak_topics.most_common(5),
+        "average_accuracy_percent": avg_acc,
+        "common_weak_topics": weak_list,
+        "student_reports": reports,
     }
 
 
@@ -689,7 +777,7 @@ def generate_report(session_id: str) -> Dict:
         if r["interpretation"] == "misconception"
     ]
 
-    return {
+    rep_doc = {
         "session_id": session_id,
         "student_name": session["student_name"],
         "enrollment_no": session.get("enrollment_no"),
@@ -706,6 +794,10 @@ def generate_report(session_id: str) -> Dict:
         "overconfident_topics": sorted(set(misconceptions)),
         "responses": responses,
     }
+    if session.get("mentor_id"):
+        db_mongo.save_student_report(rep_doc)
+    return rep_doc
+
 
 
 def class_dashboard() -> Dict:
