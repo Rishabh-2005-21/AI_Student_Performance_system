@@ -1,4 +1,4 @@
-"""MongoDB connection, collection access, and default user seeding."""
+"""MongoDB connection, collection access, default user seeding, and in-memory fallback stores."""
 
 from __future__ import annotations
 
@@ -7,6 +7,15 @@ from datetime import datetime, timezone
 from typing import Optional, List, Dict
 
 import bcrypt
+
+# ---------------------------------------------------------------------------
+# In-Memory Fallback Cache (ensures zero crashes if MongoDB Atlas is unavailable)
+# ---------------------------------------------------------------------------
+_IN_MEMORY_USERS: Dict[str, Dict] = {}
+_IN_MEMORY_QUESTION_BANKS: Dict[str, Dict] = {}
+_IN_MEMORY_CURRICULUM: Dict[str, Dict] = {}
+_IN_MEMORY_STUDENT_REPORTS: Dict[str, Dict] = {}
+
 
 # ---------------------------------------------------------------------------
 # Connection
@@ -85,9 +94,29 @@ _DEFAULT_STUDENTS = [
 
 def seed_default_users() -> None:
     """
-    Insert default accounts into MongoDB if they don't already exist.
-    Called once on application startup.
+    Insert default accounts into MongoDB or in-memory fallback.
     """
+    # Seed in-memory store
+    for u in _DEFAULT_FACULTY:
+        _IN_MEMORY_USERS[(u["identifier"], "faculty")] = {
+            "identifier": u["identifier"],
+            "name": u["name"],
+            "role": "faculty",
+            "password_hash": hash_password(u["password"]),
+            "created_at": datetime.now(timezone.utc),
+            "is_active": True,
+        }
+    for u in _DEFAULT_STUDENTS:
+        _IN_MEMORY_USERS[(u["identifier"], "student")] = {
+            "identifier": u["identifier"],
+            "name": u["name"],
+            "role": "student",
+            "password_hash": hash_password(u["password"]),
+            "created_at": datetime.now(timezone.utc),
+            "is_active": True,
+        }
+
+    # Seed MongoDB if accessible
     try:
         col = get_users_col()
 
@@ -115,10 +144,8 @@ def seed_default_users() -> None:
                 })
                 print(f"[MongoDB] Seeded student account: {u['identifier']}")
 
-        # Create a unique index on (identifier, role) to prevent duplicates
         col.create_index([("identifier", 1), ("role", 1)], unique=True, background=True)
 
-        # Create index on question_bank for fast lookups
         qb_col = get_question_bank_col()
         qb_col.create_index(
             [("mentor_id", 1), ("subject", 1), ("semester", 1)],
@@ -130,7 +157,7 @@ def seed_default_users() -> None:
             unique=True, background=True
         )
     except Exception as exc:
-        print(f"[MongoDB] Notice during seeding: {exc}")
+        print(f"[MongoDB] Notice during seeding (in-memory active): {exc}")
 
 
 
@@ -143,15 +170,15 @@ def init_mongo() -> bool:
     Connect to MongoDB and seed default users.
     Returns True if successful, False if MongoDB is unavailable.
     """
+    seed_default_users()
     try:
         db = get_db()
         db.command("ping")          # Verify connection
         print(f"[MongoDB] Connected to '{DB_NAME}' at {MONGO_URI}")
-        seed_default_users()
         return True
     except Exception as exc:
         print(f"[MongoDB] WARNING: Could not connect — {exc}")
-        print("[MongoDB] Falling back to in-memory authentication.")
+        print("[MongoDB] Falling back to in-memory storage.")
         return False
 
 
@@ -163,46 +190,42 @@ def find_user(identifier: str, role: str) -> Optional[dict]:
         )
         if doc:
             doc["_id"] = str(doc["_id"])  # make JSON-serialisable
-        return doc
+            return doc
     except Exception:
-        return None
+        pass
+    # Fallback to in-memory store
+    return _IN_MEMORY_USERS.get((identifier, role))
 
 
 def create_user(identifier: str, name: str, role: str, password: str) -> dict:
     """Insert a new user and return the created document."""
+    existing = find_user(identifier, role)
+    if existing:
+        raise ValueError(f"Account '{identifier}' already exists for role '{role}'.")
+
+    doc = {
+        "identifier":    identifier,
+        "name":          name,
+        "role":          role,
+        "password_hash": hash_password(password),
+        "created_at":    datetime.now(timezone.utc),
+        "is_active":     True,
+    }
+    _IN_MEMORY_USERS[(identifier, role)] = doc
+
     try:
         col = get_users_col()
-        if col.find_one({"identifier": identifier, "role": role}):
-            raise ValueError(f"Account '{identifier}' already exists for role '{role}'.")
-        doc = {
-            "identifier":    identifier,
-            "name":          name,
-            "role":          role,
-            "password_hash": hash_password(password),
-            "created_at":    datetime.now(timezone.utc),
-            "is_active":     True,
-        }
-        result = col.insert_one(doc)
+        result = col.insert_one(doc.copy())
         doc["_id"] = str(result.inserted_id)
-        return doc
-    except ValueError:
-        raise
     except Exception as exc:
-        print(f"[MongoDB] Warning during create_user: {exc}")
-        # In-memory fallback doc for seamless account creation
-        return {
-            "identifier":    identifier,
-            "name":          name,
-            "role":          role,
-            "password_hash": hash_password(password),
-            "created_at":    datetime.now(timezone.utc),
-            "is_active":     True,
-        }
+        print(f"[MongoDB] Notice during create_user: {exc}")
+
+    return doc
 
 
 
 # ---------------------------------------------------------------------------
-# Question Bank (MongoDB-backed)
+# Question Bank (MongoDB-backed with in-memory fallback)
 # ---------------------------------------------------------------------------
 
 def upsert_question_bank(
@@ -213,11 +236,10 @@ def upsert_question_bank(
 ) -> Dict:
     """
     Save or update the question bank for a mentor/subject/semester.
-    Only stores questions with status='approved'.
     """
-    col = get_question_bank_col()
     approved = [q for q in questions if q.get("status") == "approved"]
     now = datetime.now(timezone.utc).isoformat()
+    key = f"{mentor_id}::{subject.lower()}::{str(semester)}"
 
     doc = {
         "mentor_id": mentor_id,
@@ -228,22 +250,36 @@ def upsert_question_bank(
         "updated_at": now,
     }
 
-    result = col.update_one(
-        {"mentor_id": mentor_id, "subject": subject.lower(), "semester": str(semester)},
-        {"$set": doc},
-        upsert=True,
-    )
+    # Save to in-memory fallback cache
+    _IN_MEMORY_QUESTION_BANKS[key] = doc
+
+    modified = 1
+    upserted = True
+
+    try:
+        col = get_question_bank_col()
+        result = col.update_one(
+            {"mentor_id": mentor_id, "subject": subject.lower(), "semester": str(semester)},
+            {"$set": doc},
+            upsert=True,
+        )
+        modified = result.modified_count
+        upserted = result.upserted_id is not None
+    except Exception as exc:
+        print(f"[MongoDB] Notice during upsert_question_bank (saved in-memory): {exc}")
+
     return {
         "saved": True,
         "total": len(questions),
         "approved": len(approved),
-        "modified": result.modified_count,
-        "upserted": result.upserted_id is not None,
+        "modified": modified,
+        "upserted": upserted,
     }
 
 
 def fetch_question_bank(mentor_id: str, subject: str, semester: str) -> Optional[Dict]:
     """Fetch the question bank document for a mentor/subject/semester."""
+    key = f"{mentor_id}::{subject.lower()}::{str(semester)}"
     try:
         col = get_question_bank_col()
         doc = col.find_one(
@@ -251,9 +287,11 @@ def fetch_question_bank(mentor_id: str, subject: str, semester: str) -> Optional
         )
         if doc:
             doc["_id"] = str(doc["_id"])
-        return doc
+            return doc
     except Exception:
-        return None
+        pass
+
+    return _IN_MEMORY_QUESTION_BANKS.get(key)
 
 
 def get_approved_questions(mentor_id: str, subject: str, semester: str) -> List[Dict]:
@@ -266,6 +304,24 @@ def get_approved_questions(mentor_id: str, subject: str, semester: str) -> List[
 
 def list_question_banks_for_mentor(mentor_id: str) -> List[Dict]:
     """List all question bank entries (tests/assignments) for a mentor with full questions."""
+    results_map: Dict[str, Dict] = {}
+
+    # 1. Read from in-memory store
+    prefix = f"{mentor_id}::"
+    for k, doc in _IN_MEMORY_QUESTION_BANKS.items():
+        if k.startswith(prefix):
+            sub_key = f"{doc['subject']}::{doc['semester']}"
+            results_map[sub_key] = {
+                "mentor_id": doc["mentor_id"],
+                "subject": doc["subject"],
+                "semester": doc["semester"],
+                "questions": doc.get("questions", []),
+                "total_approved": doc.get("total_approved", 0),
+                "total_questions": len(doc.get("questions", [])),
+                "updated_at": doc.get("updated_at"),
+            }
+
+    # 2. Merge from MongoDB if available
     try:
         col = get_question_bank_col()
         docs = list(col.find(
@@ -275,23 +331,34 @@ def list_question_banks_for_mentor(mentor_id: str) -> List[Dict]:
         ))
         for d in docs:
             d["total_questions"] = len(d.get("questions", []))
-        return docs
-    except Exception:
-        return []
+            sub_key = f"{d['subject']}::{d['semester']}"
+            results_map[sub_key] = d
+    except Exception as exc:
+        print(f"[MongoDB] Notice during list_question_banks_for_mentor: {exc}")
+
+    return list(results_map.values())
 
 
 def delete_question_bank(mentor_id: str, subject: str, semester: str) -> bool:
     """Delete a saved question bank for a mentor."""
+    key = f"{mentor_id}::{subject.lower()}::{str(semester)}"
+    existed = key in _IN_MEMORY_QUESTION_BANKS
+    if existed:
+        del _IN_MEMORY_QUESTION_BANKS[key]
+
+    db_deleted = False
     try:
         col = get_question_bank_col()
         result = col.delete_one({"mentor_id": mentor_id, "subject": subject.lower(), "semester": str(semester)})
-        return result.deleted_count > 0
+        db_deleted = result.deleted_count > 0
     except Exception:
-        return False
+        pass
+
+    return existed or db_deleted
 
 
 # ---------------------------------------------------------------------------
-# Curriculum / Syllabus (MongoDB-backed)
+# Curriculum / Syllabus (MongoDB-backed with in-memory fallback)
 # ---------------------------------------------------------------------------
 
 def upsert_curriculum(
@@ -304,11 +371,11 @@ def upsert_curriculum(
     question_types: List[str],
 ) -> Dict:
     """
-    Save or update a faculty member's uploaded syllabus curriculum in MongoDB.
+    Save or update a faculty member's uploaded syllabus curriculum.
     """
-    col = get_curriculum_col()
     key = f"{subject.lower()}::{str(semester).lower()}"
     now = datetime.now(timezone.utc).isoformat()
+    store_key = f"{mentor_id}::{key}"
 
     doc = {
         "mentor_id":      mentor_id,
@@ -322,35 +389,64 @@ def upsert_curriculum(
         "updated_at":     now,
     }
 
-    result = col.update_one(
-        {"mentor_id": mentor_id, "key": key},
-        {"$set": doc},
-        upsert=True,
-    )
+    _IN_MEMORY_CURRICULUM[store_key] = doc
+
+    modified = 1
+    upserted = True
+    try:
+        col = get_curriculum_col()
+        result = col.update_one(
+            {"mentor_id": mentor_id, "key": key},
+            {"$set": doc},
+            upsert=True,
+        )
+        modified = result.modified_count
+        upserted = result.upserted_id is not None
+    except Exception as exc:
+        print(f"[MongoDB] Notice during upsert_curriculum (saved in-memory): {exc}")
+
     return {
         "saved": True,
         "key": key,
         "mentor_id": mentor_id,
-        "modified": result.modified_count,
-        "upserted": result.upserted_id is not None,
+        "modified": modified,
+        "upserted": upserted,
     }
 
 
 def fetch_curriculum(mentor_id: str, subject: str, semester: str) -> Optional[Dict]:
     """Fetch curriculum document for a mentor/subject/semester."""
+    key = f"{subject.lower()}::{str(semester).lower()}"
+    store_key = f"{mentor_id}::{key}"
     try:
         col = get_curriculum_col()
-        key = f"{subject.lower()}::{str(semester).lower()}"
         doc = col.find_one({"mentor_id": mentor_id, "key": key})
         if doc:
             doc["_id"] = str(doc["_id"])
-        return doc
+            return doc
     except Exception:
-        return None
+        pass
+
+    return _IN_MEMORY_CURRICULUM.get(store_key)
 
 
 def list_curriculum_for_mentor(mentor_id: str) -> List[Dict]:
     """List all curriculum/syllabus documents for a specific faculty member."""
+    results_map: Dict[str, Dict] = {}
+
+    prefix = f"{mentor_id}::"
+    for k, doc in _IN_MEMORY_CURRICULUM.items():
+        if k.startswith(prefix):
+            results_map[doc["key"]] = {
+                "mentor_id": doc["mentor_id"],
+                "subject": doc["subject"],
+                "semester": doc["semester"],
+                "key": doc["key"],
+                "topics": doc.get("topics", []),
+                "question_types": doc.get("question_types", []),
+                "updated_at": doc.get("updated_at"),
+            }
+
     try:
         col = get_curriculum_col()
         docs = list(col.find(
@@ -358,48 +454,70 @@ def list_curriculum_for_mentor(mentor_id: str) -> List[Dict]:
             {"_id": 0, "mentor_id": 1, "subject": 1, "semester": 1, "key": 1,
              "topics": 1, "question_types": 1, "updated_at": 1}
         ))
-        return docs
-    except Exception:
-        return []
+        for d in docs:
+            results_map[d["key"]] = d
+    except Exception as exc:
+        print(f"[MongoDB] Notice during list_curriculum_for_mentor: {exc}")
+
+    return list(results_map.values())
 
 
 def delete_curriculum_from_db(mentor_id: str, key: str) -> bool:
-    """Delete a curriculum entry for a faculty member from MongoDB."""
+    """Delete a curriculum entry for a faculty member."""
+    store_key = f"{mentor_id}::{key}"
+    existed = store_key in _IN_MEMORY_CURRICULUM
+    if existed:
+        del _IN_MEMORY_CURRICULUM[store_key]
+
+    db_deleted = False
     try:
         col = get_curriculum_col()
         result = col.delete_one({"mentor_id": mentor_id, "key": key})
-        return result.deleted_count > 0
+        db_deleted = result.deleted_count > 0
     except Exception:
-        return False
+        pass
+
+    return existed or db_deleted
 
 
 # ---------------------------------------------------------------------------
-# Student Assessment Reports (MongoDB-backed)
+# Student Assessment Reports (MongoDB-backed with in-memory fallback)
 # ---------------------------------------------------------------------------
 
 def save_student_report(report_doc: Dict) -> bool:
-    """Save or update a completed student assessment report in MongoDB."""
+    """Save or update a completed student assessment report."""
+    session_id = report_doc.get("session_id")
+    if not session_id:
+        return False
+
+    now = datetime.now(timezone.utc).isoformat()
+    report_doc["saved_at"] = now
+    _IN_MEMORY_STUDENT_REPORTS[session_id] = report_doc
+
     try:
         col = get_student_reports_col()
-        session_id = report_doc.get("session_id")
-        if not session_id:
-            return False
-        now = datetime.now(timezone.utc).isoformat()
-        report_doc["saved_at"] = now
         col.update_one({"session_id": session_id}, {"$set": report_doc}, upsert=True)
         return True
     except Exception as exc:
-        print(f"[MongoDB] Error saving student report: {exc}")
-        return False
+        print(f"[MongoDB] Notice saving student report (saved in-memory): {exc}")
+        return True
 
 
 def list_student_reports_for_mentor(mentor_id: str) -> List[Dict]:
     """Retrieve all student assessment reports associated with a faculty mentor."""
+    results_map: Dict[str, Dict] = {}
+
+    for sid, doc in _IN_MEMORY_STUDENT_REPORTS.items():
+        if doc.get("mentor_id") == mentor_id:
+            results_map[sid] = doc
+
     try:
         col = get_student_reports_col()
         docs = list(col.find({"mentor_id": mentor_id}, {"_id": 0}))
-        return docs
-    except Exception:
-        return []
+        for d in docs:
+            if d.get("session_id"):
+                results_map[d["session_id"]] = d
+    except Exception as exc:
+        print(f"[MongoDB] Notice listing student reports: {exc}")
 
-
+    return list(results_map.values())

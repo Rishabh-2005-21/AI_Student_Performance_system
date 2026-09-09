@@ -242,9 +242,7 @@ def start_mentor_session_controller():
 
 
 def mentor_dashboard_controller():
-    mentor_id = request.args.get("mentor_id", "").strip()
-    if not mentor_id:
-        return jsonify({"error": "mentor_id is required"}), 400
+    mentor_id = request.args.get("mentor_id", "").strip() or "MTR001"
     try:
         return jsonify(mentor_dashboard(mentor_id)), 200
     except ValueError as exc:
@@ -381,10 +379,10 @@ def upload_curriculum_pdf_controller():
 
 def delete_curriculum_controller():
     data = request.get_json(force=True, silent=True) or {}
-    mentor_id = str(data.get("mentor_id", "")).strip()
+    mentor_id = str(data.get("mentor_id", "")).strip() or "MTR001"
     key = str(data.get("key", "")).strip()
-    if not mentor_id or not key:
-        return jsonify({"error": "mentor_id and key are required"}), 400
+    if not key:
+        return jsonify({"error": "key is required"}), 400
     try:
         result = delete_curriculum_entry(mentor_id=mentor_id, key=key)
         return jsonify(result), 200
@@ -393,9 +391,7 @@ def delete_curriculum_controller():
 
 
 def curriculum_options_controller():
-    mentor_id = request.args.get("mentor_id", "").strip()
-    if not mentor_id:
-        return jsonify({"error": "mentor_id is required"}), 400
+    mentor_id = request.args.get("mentor_id", "").strip() or "MTR001"
     try:
         return jsonify(curriculum_options_for_mentor(mentor_id)), 200
     except ValueError as exc:
@@ -476,13 +472,13 @@ def save_question_bank_controller():
     Saves all questions (approved/rejected/pending) to MongoDB.
     """
     data      = request.get_json(force=True, silent=True) or {}
-    mentor_id = str(data.get("mentor_id", "")).strip()
+    mentor_id = str(data.get("mentor_id", "")).strip() or "MTR001"
     subject   = str(data.get("subject", "")).strip()
     semester  = str(data.get("semester", "")).strip()
     questions = data.get("questions", [])
 
-    if not mentor_id or not subject or not semester:
-        return jsonify({"error": "mentor_id, subject, and semester are required"}), 400
+    if not subject or not semester:
+        return jsonify({"error": "subject and semester are required"}), 400
     if not isinstance(questions, list):
         return jsonify({"error": "questions must be a list"}), 400
 
@@ -501,12 +497,9 @@ def get_question_bank_controller():
     GET /api/mentor/questions?mentor_id=&subject=&semester=
     Returns the full question bank for a mentor/subject/semester.
     """
-    mentor_id = request.args.get("mentor_id", "").strip()
+    mentor_id = request.args.get("mentor_id", "").strip() or "MTR001"
     subject   = request.args.get("subject", "").strip()
     semester  = request.args.get("semester", "").strip()
-
-    if not mentor_id:
-        return jsonify({"error": "mentor_id is required"}), 400
 
     # If subject/semester not provided, list all banks for mentor
     if not subject or not semester:
