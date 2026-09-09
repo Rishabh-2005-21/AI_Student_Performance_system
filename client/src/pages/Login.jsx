@@ -4,9 +4,8 @@ import {
   Brain, Eye, EyeOff, GraduationCap,
   AlertCircle, Loader2, Sparkles, User, Lock, IdCard, UserCheck, CheckCircle2
 } from 'lucide-react';
+import api from '../api/api';
 import './Login.css';
-
-const API = import.meta.env.VITE_API_URL || 'http://localhost:5000';
 
 const FEATURES = [
   'Upload Semester Syllabus (PDF)',
@@ -56,18 +55,14 @@ const Login = () => {
     setLoading(true);
     setError('');
 
-    const endpoint = mode === 'login' ? '/api/auth/login' : '/api/auth/register';
+    const endpoint = mode === 'login' ? '/auth/login' : '/auth/register';
     const body = mode === 'login'
       ? { identifier: identifier.trim(), password: password.trim(), role,
           ...(role === 'student' ? { student_name: studentName.trim() } : {}) }
       : { identifier: identifier.trim(), password: password.trim(), role, name: name.trim() };
 
     try {
-      const res  = await fetch(`${API}${endpoint}`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
-      });
-      const data = await res.json();
-      if (!res.ok) { setError(data.error || 'Something went wrong.'); return; }
+      const { data } = await api.post(endpoint, body);
 
       // For student login, use the entered display name if backend name is just identifier
       const displayName = (role === 'student' && studentName.trim()) ? studentName.trim() : data.name;
@@ -78,12 +73,13 @@ const Login = () => {
       localStorage.setItem('auth_identifier',  data.identifier);
       window.dispatchEvent(new Event('storage'));
       navigate(data.role === 'faculty' ? '/faculty' : '/student', { replace: true });
-    } catch {
-      setError('Network error — ensure the server is running on port 5000.');
+    } catch (err) {
+      setError(err?.response?.data?.error || err?.message || 'Network error — could not connect to backend server.');
     } finally {
       setLoading(false);
     }
   };
+
 
   return (
     <div className="lp-root">
