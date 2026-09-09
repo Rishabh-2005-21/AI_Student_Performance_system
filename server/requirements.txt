@@ -7,3 +7,5 @@ PyJWT
 python-docx
 google-generativeai
 python-pptx
+gunicorn
+
