@@ -444,6 +444,7 @@ const QuestionBankManager = ({ subjectData, mentorId, onBankSaved }) => {
 };
 
 const SyllabusSection = ({ mentorId, uploadSummary, onSubjectRemoved, onUploaded }) => {
+  const activeMentorId = mentorId || localStorage.getItem("auth_identifier") || localStorage.getItem("mentor_id") || "MTR001";
   const [sem, setSem]         = useState("");
   const [pdf, setPdf]         = useState(null);
   const [types, setTypes]     = useState(["mcq","short"]);
@@ -453,12 +454,14 @@ const SyllabusSection = ({ mentorId, uploadSummary, onSubjectRemoved, onUploaded
 
   const toggleType = id => setTypes(prev => prev.includes(id) ? (prev.length===1?prev:prev.filter(t=>t!==id)) : [...prev,id]);
   const handleUpload = async () => {
-    if (!sem)          { setStatus({ type:"error", msg:"Please select a semester." }); return; }
-    if (!pdf)          { setStatus({ type:"error", msg:"Please select a document file." }); return; }
-    if (!types.length) { setStatus({ type:"error", msg:"Select at least one question format." }); return; }
+    if (!activeMentorId) { setStatus({ type:"error", msg:"Faculty ID not found. Please log in again." }); return; }
+    if (!sem)            { setStatus({ type:"error", msg:"Please select a semester." }); return; }
+    if (!pdf)            { setStatus({ type:"error", msg:"Please select a document file." }); return; }
+    if (!types.length)   { setStatus({ type:"error", msg:"Select at least one question format." }); return; }
     const fd = new FormData();
-    fd.append("mentor_id", mentorId); fd.append("semester", sem);
+    fd.append("mentor_id", activeMentorId); fd.append("semester", sem);
     fd.append("full_course_pdf", pdf); fd.append("question_types", types.join(","));
+
     try {
       setLoading(true); setStatus({ type:"", msg:"Processing file for Semester "+sem+"..." });
       const { data } = await api.post("/mentor/curriculum/pdf", fd);

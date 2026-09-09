@@ -332,12 +332,10 @@ _extract_pdf_text = _extract_file_text
 
 
 def upload_curriculum_pdf_controller():
-    mentor_id = request.form.get("mentor_id", "").strip()
+    mentor_id = request.form.get("mentor_id", "").strip() or request.args.get("mentor_id", "").strip() or "MTR001"
     semester = request.form.get("semester", "").strip()
     full_course_file = request.files.get("full_course_pdf")
 
-    if not mentor_id:
-        return jsonify({"error": "mentor_id is required"}), 400
     if not semester:
         return jsonify({"error": "semester is required. Please select a semester before uploading."}), 400
     if not full_course_file:
